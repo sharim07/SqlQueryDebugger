@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QueryDoc — AI SQL Debugger</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&family=Clash+Display:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #f5f2eb;
+      --surface:     #faf8f3;
+      --panel:       #edeae1;
+      --border:      #d6d0c4;
+      --border-dark: #b8b0a0;
+      --ink:         #1a1814;
+      --ink-2:       #4a4540;
+      --ink-3:       #8a837a;
+      --accent:      #c8410a;
+      --accent-lt:   #f0d4c8;
+      --green:       #1a6b3c;
+      --green-lt:    #c8e8d5;
+      --amber:       #7a5c00;
+      --amber-lt:    #f0e4b0;
+      --blue:        #1a4a8a;
+      --blue-lt:     #d0e0f5;
+      --mono:        'Fira Code', monospace;
+      --display:     'Clash Display', sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--mono);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    /* ── NOISE TEXTURE OVERLAY ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.6;
+    }
+
+    /* ── DECORATIVE CORNER LINES ── */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0; left: 0;
+      width: 280px; height: 280px;
+      border-right: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      border-radius: 0 0 100% 0;
+      pointer-events: none;
+      z-index: 0;
+      opacity: 0.5;
+    }
+
+    .wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    /* ── HEADER ── */
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 48px;
+      animation: fadeIn 0.6s ease both;
+    }
+
+    .header-left {}
+
+    .eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 6px;
+    }
+
+    h1 {
+      font-family: var(--display);
+      font-size: clamp(32px, 5vw, 52px);
+      font-weight: 700;
+      color: var(--ink);
+      letter-spacing: -2px;
+      line-height: 1;
+    }
+
+    h1 span { color: var(--accent); }
+
+    .sub {
+      font-size: 13px;
+      color: var(--ink-3);
+      margin-top: 10px;
+      letter-spacing: 0.02em;
+    }
+
+    .version-pill {
+      font-size: 11px;
+      font-family: var(--mono);
+      background: var(--ink);
+      color: var(--bg);
+      padding: 6px 12px;
+      border-radius: 4px;
+      letter-spacing: 0.08em;
+      align-self: flex-start;
+      margin-top: 6px;
+    }
+
+    /* ── LAYOUT GRID ── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+
+    @media (max-width: 680px) {
+      .main-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── PANELS ── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+      animation: fadeIn 0.6s ease both;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .panel-title {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-2);
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      display: inline-block;
+    }
+
+    .panel-actions { display: flex; gap: 6px; }
+
+    .btn-sm {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 5px 10px;
+      border: 1px solid var(--border-dark);
+      background: transparent;
+      color: var(--ink-2);
+      border-radius: 2px;
+      cursor: pointer;
+      letter-spacing: 0.04em;
+      transition: all 0.15s;
+    }
+
+    .btn-sm:hover { background: var(--panel); color: var(--ink); }
+
+    /* ── CODE EDITOR ── */
+    .code-area {
+      width: 100%;
+      min-height: 240px;
+      background: var(--surface);
+      border: none;
+      outline: none;
+      resize: vertical;
+      font-family: var(--mono);
+      font-size: 13.5px;
+      line-height: 1.8;
+      color: var(--ink);
+      padding: 16px;
+      tab-size: 2;
+      white-space: pre;
+      overflow-x: auto;
+    }
+
+    .code-area::placeholder { color: var(--ink-3); }
+
+    /* ── DIALECT SELECT ── */
+    .options-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      flex-wrap: wrap;
+    }
+
+    .opt-label {
+      font-size: 11px;
+      color: var(--ink-3);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .dialect-select {
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border-dark);
+      color: var(--ink);
+      padding: 5px 10px;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .dialect-select:focus { border-color: var(--accent); }
+
+    /* ── API KEY ── */
+    .api-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    .api-input {
+      flex: 1;
+      font-family: var(--mono);
+      font-size: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border-dark);
+      color: var(--ink);
+      padding: 7px 12px;
+      border-radius: 2px;
+      outline: none;
+    }
+
+    .api-input::placeholder { color: var(--ink-3); }
+    .api-input:focus { border-color: var(--accent); }
+
+    .api-link {
+      font-size: 11px;
+      color: var(--ink-3);
+      text-decoration: none;
+    }
+
+    .api-link:hover { color: var(--accent); }
+
+    /* ── DEBUG BUTTON ── */
+    .debug-btn {
+      width: 100%;
+      font-family: var(--display);
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      padding: 18px;
+      background: var(--ink);
+      color: var(--bg);
+      border: none;
+      border-radius: 2px;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: background 0.2s, transform 0.1s;
+      animation: fadeIn 0.6s ease 0.2s both;
+    }
+
+    .debug-btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--accent);
+      transform: translateX(-100%);
+      transition: transform 0.3s ease;
+    }
+
+    .debug-btn:hover::before { transform: translateX(0); }
+    .debug-btn:hover { color: #fff; }
+    .debug-btn:active { transform: scale(0.99); }
+    .debug-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .debug-btn:disabled::before { display: none; }
+
+    .debug-btn span { position: relative; z-index: 1; }
+
+    /* ── RESULTS SECTION ── */
+    #results-section {
+      display: none;
+      animation: slideUp 0.5s ease both;
+    }
+
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── STATUS BAR ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px 20px;
+      border-radius: 2px;
+      margin-bottom: 20px;
+      border: 1px solid;
+    }
+
+    .status-bar.ok      { background: var(--green-lt); border-color: #a0d0b8; color: var(--green); }
+    .status-bar.error   { background: var(--accent-lt); border-color: #e0b0a0; color: var(--accent); }
+    .status-bar.warning { background: var(--amber-lt); border-color: #d8c880; color: var(--amber); }
+
+    .status-icon { font-size: 20px; flex-shrink: 0; }
+    .status-title { font-family: var(--display); font-size: 17px; font-weight: 600; letter-spacing: -0.03em; }
+    .status-sub { font-size: 12px; opacity: 0.8; margin-top: 1px; }
+
+    /* ── ISSUES LIST ── */
+    .section-label {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 12px;
+      margin-top: 28px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-label::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    .issues-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 4px; }
+
+    .issue-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid;
+      border-radius: 2px;
+      padding: 14px 16px;
+    }
+
+    .issue-card.critical { border-left-color: var(--accent); }
+    .issue-card.warning  { border-left-color: #c49000; }
+    .issue-card.info     { border-left-color: var(--blue); }
+
+    .issue-type {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    .issue-card.critical .issue-type { color: var(--accent); }
+    .issue-card.warning  .issue-type { color: #9a7000; }
+    .issue-card.info     .issue-type { color: var(--blue); }
+
+    .issue-desc { font-size: 13px; color: var(--ink); line-height: 1.6; }
+    .issue-hint { font-size: 12px; color: var(--ink-3); margin-top: 5px; }
+
+    /* ── FIXED QUERY ── */
+    .fixed-query-wrap {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .fq-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .fq-label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--green);
+      font-weight: 500;
+    }
+
+    .copy-btn {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      border: 1px solid var(--border-dark);
+      background: transparent;
+      color: var(--ink-2);
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .copy-btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+    .fixed-query-code {
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.8;
+      padding: 16px;
+      color: var(--ink);
+      white-space: pre-wrap;
+      word-break: break-word;
+      overflow-x: auto;
+    }
+
+    /* SQL syntax highlight */
+    .kw  { color: var(--accent); font-weight: 500; }
+    .fn  { color: var(--blue); }
+    .str { color: var(--green); }
+    .num { color: #8b5cf6; }
+    .cmt { color: var(--ink-3); font-style: italic; }
+
+    /* ── EXPLANATION BOX ── */
+    .explanation-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 18px 20px;
+      font-size: 13px;
+      line-height: 1.9;
+      color: var(--ink-2);
+    }
+
+    /* ── DIFF VIEW ── */
+    .diff-view {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .diff-row {
+      display: flex;
+      font-size: 12.5px;
+      font-family: var(--mono);
+      line-height: 1.8;
+      padding: 2px 14px;
+    }
+
+    .diff-row.removed { background: #fde8e8; color: #8b1a1a; }
+    .diff-row.added   { background: #e0f0e8; color: #1a4a2a; }
+    .diff-row.same    { color: var(--ink-3); }
+
+    .diff-sign { width: 18px; flex-shrink: 0; font-weight: 600; }
+
+    /* ── LOADING ── */
+    #loading {
+      display: none;
+      padding: 40px;
+      text-align: center;
+    }
+
+    .typewriter {
+      font-size: 13px;
+      color: var(--ink-3);
+      letter-spacing: 0.04em;
+    }
+
+    .typewriter::after {
+      content: '|';
+      animation: blink-cur 0.7s step-end infinite;
+      margin-left: 2px;
+      color: var(--accent);
+    }
+
+    @keyframes blink-cur {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0; }
+    }
+
+    .progress-line {
+      width: 200px;
+      height: 2px;
+      background: var(--border);
+      margin: 16px auto 0;
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 99px;
+      animation: progress 2s ease-in-out infinite;
+    }
+
+    @keyframes progress {
+      0%   { width: 0%; margin-left: 0; }
+      50%  { width: 60%; margin-left: 20%; }
+      100% { width: 0%; margin-left: 100%; }
+    }
+
+    /* ── ERROR BOX ── */
+    #error-box {
+      display: none;
+      background: var(--accent-lt);
+      border: 1px solid #e0b0a0;
+      border-radius: 2px;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: var(--accent);
+      margin-top: 16px;
+    }
+
+    /* ── EXAMPLES STRIP ── */
+    .examples-strip {
+      margin-bottom: 20px;
+      animation: fadeIn 0.6s ease 0.1s both;
+    }
+
+    .examples-label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--ink-3);
+      margin-bottom: 10px;
+    }
+
+    .examples-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .example-chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 6px 12px;
+      border: 1px solid var(--border-dark);
+      border-radius: 2px;
+      background: var(--surface);
+      color: var(--ink-2);
+      cursor: pointer;
+      transition: all 0.15s;
+      line-height: 1.3;
+    }
+
+    .example-chip:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+    /* ── FOOTER ── */
+    footer {
+      margin-top: 64px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--ink-3);
+      letter-spacing: 0.06em;
+      animation: fadeIn 0.6s ease 0.3s both;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── SCAN COUNTER ── */
+    .scan-count {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--ink-3);
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="wrapper">
+
+  <!-- ── HEADER ── -->
+  <header>
+    <div class="header-left">
+      <p class="eyebrow">// AI-powered debugging tool</p>
+      <h1>Query<span>Doc</span></h1>
+      <p class="sub">Paste broken SQL → get the fix + explanation instantly</p>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+      <div class="version-pill">v1.0 · Gemini</div>
+      <div class="scan-count" id="scanCounter">0 queries debugged</div>
+    </div>
+  </header>
+
+  <!-- ── EXAMPLE QUERIES ── -->
+  <div class="examples-strip">
+    <p class="examples-label">Try an example →</p>
+    <div class="examples-row">
+      <div class="example-chip" onclick="loadExample('missing-where')">Missing WHERE clause</div>
+      <div class="example-chip" onclick="loadExample('wrong-join')">Wrong JOIN type</div>
+      <div class="example-chip" onclick="loadExample('aggregate')">GROUP BY error</div>
+      <div class="example-chip" onclick="loadExample('subquery')">Subquery mistake</div>
+      <div class="example-chip" onclick="loadExample('syntax')">Syntax error</div>
+    </div>
+  </div>
+
+  <!-- ── EDITOR GRID ── -->
+  <div class="main-grid">
+
+    <!-- LEFT: INPUT QUERY -->
+    <div class="panel" style="animation-delay:0.05s">
+      <div class="panel-header">
+        <span class="panel-title"><span class="panel-dot"></span>Broken SQL query</span>
+        <div class="panel-actions">
+          <button class="btn-sm" onclick="clearInput()">Clear</button>
+        </div>
+      </div>
+      <div class="options-bar">
+        <span class="opt-label">Dialect</span>
+        <select class="dialect-select" id="dialect">
+          <option value="MySQL">MySQL</option>
+          <option value="PostgreSQL">PostgreSQL</option>
+          <option value="SQLite">SQLite</option>
+          <option value="SQL Server">SQL Server (T-SQL)</option>
+          <option value="Oracle">Oracle PL/SQL</option>
+          <option value="standard SQL">Standard SQL</option>
+        </select>
+        <span class="opt-label" style="margin-left:auto;">Error msg (optional)</span>
+      </div>
+      <textarea
+        id="queryInput"
+        class="code-area"
+        placeholder="-- Paste your broken SQL query here
+-- Example:
+SELECT name, COUNT(*)
+FROM employees
+INNER JOIN departments
+WHERE salary > 50000
+GROUP name;"
+        spellcheck="false"
+      ></textarea>
+      <div class="api-bar">
+        <input
+          type="password"
+          id="apiKey"
+          class="api-input"
+          placeholder="Gemini API key → AIza..."
+          autocomplete="off"
+        />
+        <a class="api-link" href="https://aistudio.google.com/app/apikey" target="_blank">Get free key ↗</a>
+      </div>
+    </div>
+
+    <!-- RIGHT: ERROR MESSAGE INPUT -->
+    <div class="panel" style="animation-delay:0.1s">
+      <div class="panel-header">
+        <span class="panel-title"><span class="panel-dot" style="background:#c49000"></span>Error message / context</span>
+        <div class="panel-actions">
+          <button class="btn-sm" onclick="clearError()">Clear</button>
+        </div>
+      </div>
+      <div class="options-bar">
+        <span class="opt-label">Paste the error your DB gave you (optional but helps AI)</span>
+      </div>
+      <textarea
+        id="errorInput"
+        class="code-area"
+        style="min-height:160px;"
+        placeholder="-- Example error messages:
+-- ERROR 1064: You have an error in your SQL syntax
+-- ERROR: column &quot;name&quot; does not exist
+-- ORA-00942: table or view does not exist
+-- Or describe what's going wrong:
+-- &quot;Returns wrong results - duplicates appearing&quot;"
+        spellcheck="false"
+      ></textarea>
+
+      <div class="panel-header" style="border-top:1px solid var(--border);border-bottom:none;margin-top:auto;">
+        <span class="panel-title" style="font-size:10px;">Schema info (optional — helps with table/column errors)</span>
+      </div>
+      <textarea
+        id="schemaInput"
+        class="code-area"
+        style="min-height:100px;"
+        placeholder="-- Paste relevant CREATE TABLE or describe your schema:
+-- employees(id, name, salary, dept_id)
+-- departments(id, dept_name)"
+        spellcheck="false"
+      ></textarea>
+    </div>
+  </div>
+
+  <!-- ── DEBUG BUTTON ── -->
+  <button class="debug-btn" id="debugBtn" onclick="debugQuery()">
+    <span>⚙ Debug My SQL Query</span>
+  </button>
+
+  <!-- ── LOADING ── -->
+  <div id="loading">
+    <p class="typewriter" id="loadingMsg">Analysing query structure</p>
+    <div class="progress-line"><div class="progress-fill"></div></div>
+  </div>
+
+  <!-- ── ERROR BOX ── -->
+  <div id="error-box"></div>
+
+  <!-- ── RESULTS ── -->
+  <div id="results-section">
+
+    <!-- Status bar -->
+    <div class="status-bar" id="statusBar">
+      <span class="status-icon" id="statusIcon"></span>
+      <div>
+        <div class="status-title" id="statusTitle"></div>
+        <div class="status-sub" id="statusSub"></div>
+      </div>
+    </div>
+
+    <!-- Issues -->
+    <div id="issuesWrap" style="display:none;">
+      <p class="section-label">Issues Found</p>
+      <div class="issues-list" id="issuesList"></div>
+    </div>
+
+    <!-- Fixed Query -->
+    <div id="fixedWrap" style="display:none;">
+      <p class="section-label">Fixed Query</p>
+      <div class="fixed-query-wrap">
+        <div class="fq-header">
+          <span class="fq-label">✓ corrected sql</span>
+          <button class="copy-btn" onclick="copyFixed()">Copy</button>
+        </div>
+        <pre class="fixed-query-code" id="fixedQueryCode"></pre>
+      </div>
+    </div>
+
+    <!-- Diff view -->
+    <div id="diffWrap" style="display:none;">
+      <p class="section-label">What Changed</p>
+      <div class="diff-view" id="diffView"></div>
+    </div>
+
+    <!-- Explanation -->
+    <div id="explWrap" style="display:none;">
+      <p class="section-label">Explanation</p>
+      <div class="explanation-box" id="explanationBox"></div>
+    </div>
+
+  </div>
+
+  <!-- ── FOOTER ── -->
+  <footer>
+    <span>QueryDoc · AI SQL Debugger · Gemini 2.0 Flash</span>
+    <span>For learning & debugging · DBMS project · MAKAUT CSE</span>
+  </footer>
+
+</div>
+
+<script>
+  /* ─── EXAMPLES ─── */
+  const EXAMPLES = {
+    'missing-where': {
+      query: `-- Deletes ALL rows! Missing WHERE clause
+DELETE FROM employees
+salary < 30000;`,
+      error: `ERROR 1064 (42000): You have an error in your SQL syntax near 'salary < 30000'`
+    },
+    'wrong-join': {
+      query: `-- Should be LEFT JOIN to include employees without departments
+SELECT e.name, d.dept_name
+FROM employees e
+INNER JOIN departments d ON e.dept_id = d.id
+WHERE d.dept_name = 'Engineering';`,
+      error: `Query runs but returns fewer rows than expected — some employees are missing`
+    },
+    'aggregate': {
+      query: `-- GROUP BY error: selecting non-aggregated column
+SELECT dept_id, name, COUNT(*) as total, SUM(salary) as total_salary
+FROM employees
+GROUP BY dept_id;`,
+      error: `ERROR 1055: 'employees.name' isn't in GROUP BY (sql_mode=only_full_group_by)`
+    },
+    'subquery': {
+      query: `-- Correlated subquery performance issue + wrong comparison
+SELECT * FROM orders
+WHERE order_id IN (
+  SELECT MAX(order_id)
+  FROM order_items
+  GROUP BY product_id
+  HAVING COUNT(*) > 5
+)
+AND status = 'pending'
+ORDER BY created_at;`,
+      error: `Returns wrong results — expecting 12 rows but getting 3`
+    },
+    'syntax': {
+      query: `-- Multiple syntax mistakes
+SELCT id, name salry
+FORM employees
+WHER salary > 5000
+AND departement = 'HR'
+ORDDER BY name ASC;`,
+      error: `ERROR 1064: You have an error in your SQL syntax`
+    }
+  };
+
+  function loadExample(key) {
+    const ex = EXAMPLES[key];
+    if (!ex) return;
+    document.getElementById('queryInput').value = ex.query;
+    document.getElementById('errorInput').value = ex.error;
+    document.getElementById('schemaInput').value = '';
+  }
+
+  function clearInput() { document.getElementById('queryInput').value = ''; }
+  function clearError()  { document.getElementById('errorInput').value = ''; }
+
+  /* ─── COUNTER ─── */
+  let scanCount = parseInt(sessionStorage.getItem('sql_scans') || '0');
+  updateCounter();
+
+  function updateCounter() {
+    document.getElementById('scanCounter').textContent = scanCount + ' quer' + (scanCount === 1 ? 'y' : 'ies') + ' debugged';
+  }
+
+  /* ─── LOADING MESSAGES ─── */
+  const loadingMsgs = [
+    'Parsing query tokens',
+    'Checking syntax rules',
+    'Analysing JOIN conditions',
+    'Validating GROUP BY clauses',
+    'Reviewing WHERE predicates',
+    'Generating corrected query',
+  ];
+  let msgInterval = null;
+
+  function startLoadingCycle() {
+    let i = 0;
+    document.getElementById('loadingMsg').textContent = loadingMsgs[0];
+    msgInterval = setInterval(() => {
+      i = (i + 1) % loadingMsgs.length;
+      document.getElementById('loadingMsg').textContent = loadingMsgs[i];
+    }, 1800);
+  }
+
+  function stopLoadingCycle() {
+    if (msgInterval) { clearInterval(msgInterval); msgInterval = null; }
+  }
+
+  /* ─── MAIN FUNCTION ─── */
+  async function debugQuery() {
+    const query  = document.getElementById('queryInput').value.trim();
+    const errMsg = document.getElementById('errorInput').value.trim();
+    const schema = document.getElementById('schemaInput').value.trim();
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const dialect = document.getElementById('dialect').value;
+
+    if (!query)  return showError('Please paste a SQL query to debug.');
+    if (!apiKey) return showError('Please enter your Gemini API key.');
+
+    setLoading(true);
+    hideResults();
+
+    const prompt = `You are an expert SQL database engineer and teacher. Debug the following ${dialect} SQL query.
+
+SQL QUERY:
+\`\`\`sql
+${query}
+\`\`\`
+${errMsg ? `\nERROR MESSAGE:\n${errMsg}` : ''}
+${schema ? `\nSCHEMA / CONTEXT:\n${schema}` : ''}
+
+Respond ONLY with a valid JSON object (no markdown, no code blocks, no extra text). Use this exact format:
+{
+  "has_errors": true | false,
+  "severity": "critical" | "warning" | "info" | "clean",
+  "summary": "<one sentence: what is the main problem or status>",
+  "issues": [
+    {
+      "type": "critical" | "warning" | "info",
+      "title": "<short issue name>",
+      "description": "<what is wrong and why it matters>",
+      "hint": "<how to fix this specific issue>"
+    }
+  ],
+  "fixed_query": "<the complete corrected SQL query, properly formatted with newlines as \\n>",
+  "changes": [
+    "<concise description of change 1>",
+    "<concise description of change 2>"
+  ],
+  "explanation": "<2-4 sentences: explain what was wrong in plain English a student can understand, what the fix does, and any DBMS concept involved (e.g. GROUP BY rules, JOIN types, NULL handling)>"
+}
+
+Rules:
+- If query is already correct: has_errors=false, severity="clean", issues=[], fixed_query=original query, explanation explains why it is correct
+- issues array: 1-5 items max, ordered by severity
+- fixed_query must be complete, working ${dialect} SQL with proper formatting
+- explanation must mention the relevant SQL/DBMS concept (great for learning)`;
+
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 1200 }
+          })
+        }
+      );
+
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error?.message || `API error ${res.status}`);
+      }
+
+      const data = await res.json();
+      const raw  = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const clean = raw.replace(/```json|```/g, '').trim();
+
+      let parsed;
+      try { parsed = JSON.parse(clean); }
+      catch { throw new Error('Could not parse AI response. Please try again.'); }
+
+      renderResults(query, parsed);
+      scanCount++;
+      sessionStorage.setItem('sql_scans', scanCount);
+      updateCounter();
+
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* ─── RENDER ─── */
+  function renderResults(originalQuery, data) {
+    const { has_errors, severity, summary, issues, fixed_query, changes, explanation } = data;
+
+    // Status bar
+    const sb = document.getElementById('statusBar');
+    sb.className = 'status-bar';
+    const icon  = { clean: '✅', info: 'ℹ️', warning: '⚠️', critical: '🔴' };
+    const cls   = { clean: 'ok', info: 'ok', warning: 'warning', critical: 'error' };
+    sb.classList.add(cls[severity] || 'warning');
+    document.getElementById('statusIcon').textContent  = icon[severity] || '🔍';
+    document.getElementById('statusTitle').textContent = has_errors ? 'Issues Detected' : 'Query Looks Good';
+    document.getElementById('statusSub').textContent   = summary || '';
+
+    // Issues
+    if (issues && issues.length > 0) {
+      const list = document.getElementById('issuesList');
+      list.innerHTML = '';
+      issues.forEach(issue => {
+        const card = document.createElement('div');
+        card.className = `issue-card ${issue.type || 'info'}`;
+        card.innerHTML = `
+          <div class="issue-type">${issue.type?.toUpperCase() || 'INFO'} — ${issue.title || ''}</div>
+          <div class="issue-desc">${issue.description || ''}</div>
+          ${issue.hint ? `<div class="issue-hint">💡 ${issue.hint}</div>` : ''}
+        `;
+        list.appendChild(card);
+      });
+      document.getElementById('issuesWrap').style.display = 'block';
+    }
+
+    // Fixed query
+    if (fixed_query) {
+      const code = document.getElementById('fixedQueryCode');
+      code.innerHTML = sqlHighlight(fixed_query.replace(/\\n/g, '\n'));
+      document.getElementById('fixedWrap').style.display = 'block';
+    }
+
+    // Diff (changes list)
+    if (changes && changes.length > 0) {
+      const dv = document.getElementById('diffView');
+      dv.innerHTML = '';
+      changes.forEach(ch => {
+        const row = document.createElement('div');
+        row.className = 'diff-row added';
+        row.innerHTML = `<span class="diff-sign">+</span><span>${ch}</span>`;
+        dv.appendChild(row);
+      });
+      // Show original as removed summary
+      const orig = document.createElement('div');
+      orig.className = 'diff-row removed';
+      orig.innerHTML = `<span class="diff-sign">−</span><span>Original query had ${issues?.length || '?'} issue(s)</span>`;
+      dv.prepend(orig);
+      document.getElementById('diffWrap').style.display = 'block';
+    }
+
+    // Explanation
+    if (explanation) {
+      document.getElementById('explanationBox').textContent = explanation;
+      document.getElementById('explWrap').style.display = 'block';
+    }
+
+    document.getElementById('results-section').style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
+  }
+
+  /* ─── SQL SYNTAX HIGHLIGHT ─── */
+  function sqlHighlight(code) {
+    const keywords = ['SELECT','FROM','WHERE','JOIN','LEFT','RIGHT','INNER','OUTER','FULL','ON',
+      'GROUP BY','ORDER BY','HAVING','INSERT','UPDATE','DELETE','CREATE','DROP','ALTER','TABLE',
+      'INTO','VALUES','SET','AS','AND','OR','NOT','IN','EXISTS','LIKE','BETWEEN','IS','NULL',
+      'DISTINCT','LIMIT','OFFSET','UNION','ALL','ANY','CASE','WHEN','THEN','ELSE','END',
+      'COUNT','SUM','AVG','MIN','MAX','COALESCE','IFNULL','ISNULL','CAST','CONVERT',
+      'PRIMARY KEY','FOREIGN KEY','REFERENCES','INDEX','VIEW','PROCEDURE','FUNCTION',
+      'BEGIN','COMMIT','ROLLBACK','TRANSACTION','CONSTRAINT','DEFAULT','AUTO_INCREMENT',
+      'GROUP','BY','ORDER','ASC','DESC','USING'];
+
+    let escaped = code
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    // Comments
+    escaped = escaped.replace(/(--[^\n]*)/g, '<span class="cmt">$1</span>');
+
+    // Strings
+    escaped = escaped.replace(/('([^']*)')/g, '<span class="str">$1</span>');
+
+    // Numbers
+    escaped = escaped.replace(/\b(\d+(\.\d+)?)\b/g, '<span class="num">$1</span>');
+
+    // Keywords (case-insensitive, whole word)
+    const kwSorted = [...keywords].sort((a, b) => b.length - a.length);
+    kwSorted.forEach(kw => {
+      const re = new RegExp(`\\b(${kw.replace(/ /g, '\\s+')})\\b`, 'gi');
+      escaped = escaped.replace(re, (m) => `<span class="kw">${m}</span>`);
+    });
+
+    return escaped;
+  }
+
+  /* ─── COPY FIXED QUERY ─── */
+  function copyFixed() {
+    const pre = document.getElementById('fixedQueryCode');
+    navigator.clipboard.writeText(pre.innerText).then(() => {
+      const btn = document.querySelector('.copy-btn');
+      const orig = btn.textContent;
+      btn.textContent = '✓ Copied!';
+      setTimeout(() => btn.textContent = orig, 1800);
+    });
+  }
+
+  /* ─── UI HELPERS ─── */
+  function setLoading(on) {
+    const loading = document.getElementById('loading');
+    const btn     = document.getElementById('debugBtn');
+    loading.style.display = on ? 'block' : 'none';
+    btn.disabled = on;
+    btn.querySelector('span').textContent = on ? '⚙ Analysing...' : '⚙ Debug My SQL Query';
+    if (on) {
+      startLoadingCycle();
+      document.getElementById('error-box').style.display = 'none';
+    } else {
+      stopLoadingCycle();
+    }
+  }
+
+  function hideResults() {
+    document.getElementById('results-section').style.display = 'none';
+    document.getElementById('issuesWrap').style.display  = 'none';
+    document.getElementById('fixedWrap').style.display   = 'none';
+    document.getElementById('diffWrap').style.display    = 'none';
+    document.getElementById('explWrap').style.display    = 'none';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-box');
+    el.textContent = '✗ ' + msg;
+    el.style.display = 'block';
+  }
+
+  /* ─── KEYBOARD SHORTCUT ─── */
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') debugQuery();
+  });
+
+  /* ─── PERSIST API KEY ─── */
+  const savedKey = sessionStorage.getItem('gemini_key_sql');
+  if (savedKey) document.getElementById('apiKey').value = savedKey;
+  document.getElementById('apiKey').addEventListener('input', e => {
+    sessionStorage.setItem('gemini_key_sql', e.target.value);
+  });
+</script>
+</body>
+</html>
